@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Allow: /chat/
+Disallow: /chat/api.php
+Disallow: /chat/upload.php
+Disallow: /chat/clean.php
+Disallow: /chat/config.php
+Disallow: /chat/file/
+
+Sitemap: https://yunzhiapi.cn/chat/sitemap.xml
