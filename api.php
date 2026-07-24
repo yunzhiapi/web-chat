@@ -299,8 +299,9 @@ if ($action === 'image') {
         'model'    => $module['model'],
         'messages' => [['role' => 'user', 'content' => $question]],
     ];
-    [$content, $err, $code, $message] = callChatApi($config, $payload, $module['timeout'] ?? null);
+    [$content, $err, $code, $message, $usage] = callChatApi($config, $payload, $module['timeout'] ?? null);
     if ($err) respondError($err, $code, $type);
+    if ($usage) logTokenUsage($action, $module['model'], $uid, $usage, $config);
 
     $imageData = extractImageFromMessage($content, is_array($message) ? $message : []);
     if ($imageData === null) {
@@ -366,8 +367,9 @@ if ($action === 'translate') {
         'max_tokens'  => $module['max_tokens'],
         'temperature' => $module['temperature'],
     ];
-    [$content, $err, $code] = callChatApi($config, $payload);
+    [$content, $err, $code, $_, $usage] = callChatApi($config, $payload);
     if ($err) respondError($err, $code, $type);
+    if ($usage) logTokenUsage($action, $module['model'], $uid, $usage, $config);
     // 清理模型可能附加的包裹符号
     $content = preg_replace('/^```[a-zA-Z]*\s*|\s*```$/', '', $content);
     if (strlen($content) >= 2) {
