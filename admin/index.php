@@ -509,7 +509,43 @@ tr:hover { background: rgba(0,0,0,0.02); }
 .badge-error { background: #fee2e2; color: #991b1b; }
 /* ── 网格 ── */
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
-@media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 768px) {
+    .grid-2 { grid-template-columns: 1fr; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .layout { padding: 0.75rem; gap: 0.75rem; }
+    .topbar { padding: 0 0.75rem; height: 48px; }
+    .topbar h1 { font-size: 0.9rem; }
+    .btn { font-size: 0.72rem; padding: 0.35rem 0.65rem; }
+    .stat-card { padding: 0.8rem 0.9rem; }
+    .stat-value { font-size: 1.3rem; }
+    .stat-icon { width: 34px; height: 34px; font-size: 0.9rem; }
+    .panel-header { padding: 0.75rem 0.9rem; font-size: 0.85rem; }
+    .panel-body { padding: 0.75rem 0.9rem; }
+    .log-viewer { font-size: 0.65rem; max-height: 200px; padding: 0.75rem; }
+    table { font-size: 0.72rem; }
+    th, td { padding: 0.45rem 0.5rem; }
+    .form-row { flex-direction: column; align-items: stretch; gap: 0.3rem; }
+    .form-row label { width: auto; }
+    .input-sm { width: 100% !important; max-width: none; }
+    .w-20, .w-24 { max-width: none !important; width: 100% !important; }
+    .topbar .actions { gap: 0.3rem; }
+    .topbar .actions .btn span { display: none; }
+    .modal-content { max-width: 95%; }
+}
+@media (max-width: 480px) {
+    .stats-grid { grid-template-columns: 1fr; }
+    .topbar { height: 42px; padding: 0 0.5rem; }
+    .topbar h1 { font-size: 0.8rem; }
+    .topbar h1 i { margin-right: 0.2rem; }
+    .btn { font-size: 0.68rem; padding: 0.3rem 0.5rem; gap: 0.2rem; }
+    .layout { padding: 0.5rem; gap: 0.5rem; }
+    .stat-card { padding: 0.65rem 0.75rem; border-radius: 10px; }
+    .stat-value { font-size: 1.15rem; }
+    .stat-label { font-size: 0.68rem; }
+    .panel { border-radius: 10px; }
+    .log-viewer { max-height: 160px; font-size: 0.6rem; }
+    .toast { font-size: 0.75rem; padding: 0.5rem 0.9rem; left: 0.5rem; right: 0.5rem; transform: none; border-radius: 12px; text-align: center; }
+}
 /* ── toast ── */
 .toast {
     position: fixed; top: 1rem; left: 50%; transform: translateX(-50%);
