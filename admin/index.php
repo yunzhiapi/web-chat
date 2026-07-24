@@ -760,7 +760,7 @@ tr:hover { background: rgba(0,0,0,0.02); }
     echo '
     <div class="panel">
         <div class="panel-header">
-            <span><i class="fa-solid fa-scroll mr-2"></i>错误日志 (' . date('Y-m-d') . ')</span>
+            <span><i class="fa-solid fa-scroll mr-2"></i>系统日志 (' . date('Y-m-d') . ')</span>
             <button class="btn btn-sm btn-ghost" onclick="refreshLogs()"><i class="fa-solid fa-rotate"></i> 刷新</button>
         </div>
         <div class="panel-body">
