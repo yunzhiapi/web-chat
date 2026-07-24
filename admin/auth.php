@@ -48,11 +48,13 @@ function jwt_decode(string $token, string $secret = ADMIN_JWT_SECRET): ?array {
 
 // ── 创建登录 Token ──
 function create_admin_token(): string {
+    $csrf = bin2hex(random_bytes(32));
     return jwt_encode([
         'sub'  => 'admin',
         'iat'  => time(),
         'exp'  => time() + ADMIN_JWT_EXPIRY,
         'jti'  => bin2hex(random_bytes(8)),
+        'csrf' => $csrf,
     ]);
 }
 

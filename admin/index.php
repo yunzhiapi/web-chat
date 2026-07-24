@@ -53,27 +53,23 @@ function handle_login(): void {
 }
 
 // ═══════════════════════════════════════
-// CSRF 令牌
+// CSRF 令牌 (基于 JWT，无状态)
 // ═══════════════════════════════════════
 function csrf_token(): string {
-    if (empty($_SESSION['csrf_token'])) {
-        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-    }
-    return $_SESSION['csrf_token'];
+    $token = $_COOKIE['admin_token'] ?? '';
+    if (!$token) return '';
+    $payload = jwt_decode($token);
+    return $payload['csrf'] ?? '';
 }
 function csrf_verify(): void {
-    $token = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? $_GET['_csrf'] ?? '';
-    $stored = $_SESSION['csrf_token'] ?? '';
-    if (!$token || !$stored || !hash_equals($stored, $token)) {
+    $urlToken = $_GET['_csrf'] ?? '';
+    $storedToken = csrf_token();
+    if (!$urlToken || !$storedToken || !hash_equals($storedToken, $urlToken)) {
         http_response_code(403);
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode(['error' => 'CSRF 验证失败，请刷新页面重试']);
         exit;
     }
-}
-// 启动 session（用于 CSRF）
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
 }
 
 // ═══════════════════════════════════════
@@ -595,7 +591,7 @@ const ADMIN_BASE_URL = '<?php echo ADMIN_BASE; ?>';
 
 async function apiAction(cmd, extra = '') {
     try {
-        const resp = await fetch('?action=api&cmd=' + cmd + '&_csrf=' + encodeURIComponent(CSRF_TOKEN) + extra);
+        const resp = await fetch('?action=api&cmd=' + cmd + '&_csrf=' + encodeURIComponent(CSRF_TOKEN) + extra, { credentials: 'same-origin' });
         const data = await resp.json();
         showToast(data.message || data.error || '完成', data.ok !== false && !data.error);
         setTimeout(() => location.reload(), 800);
@@ -605,7 +601,7 @@ async function apiAction(cmd, extra = '') {
 }
 async function refreshLogs() {
     try {
-        const resp = await fetch('?action=api&cmd=logs&type=today&_csrf=' + encodeURIComponent(CSRF_TOKEN));
+        const resp = await fetch('?action=api&cmd=logs&type=today&_csrf=' + encodeURIComponent(CSRF_TOKEN), { credentials: 'same-origin' });
         const data = await resp.json();
         document.getElementById('log-viewer').textContent = data.content || '暂无日志';
         showToast('日志已刷新', true);
