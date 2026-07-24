@@ -1,0 +1,566 @@
+<?php
+/**
+ * 云智计算后台管理系统
+ * 安全入口 - 所有后台请求经此路由
+ */
+error_reporting(E_ALL);
+ini_set('display_errors', '0');
+
+require_once __DIR__ . '/auth.php';
+
+$action = $_GET['action'] ?? 'dashboard';
+
+// ── 路由分发 ──
+switch ($action) {
+    case 'login':
+        handle_login();
+        break;
+    case 'logout':
+        admin_logout();
+        header('Location: ' . ADMIN_BASE . 'index.php?action=login');
+        exit;
+    case 'api':
+        handle_api();
+        break;
+    default:
+        require_auth();
+        show_dashboard();
+}
+
+// ═══════════════════════════════════════
+// 登录处理
+// ═══════════════════════════════════════
+function handle_login(): void {
+    $error = '';
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $password = $_POST['password'] ?? '';
+        if (password_verify($password, ADMIN_PASSWORD_HASH)) {
+            $token = create_admin_token();
+            setcookie('admin_token', $token, [
+                'expires'  => time() + ADMIN_JWT_EXPIRY,
+                'path'     => '/',
+                'httponly' => true,
+                'samesite' => 'Lax',
+            ]);
+            header('Location: ' . ADMIN_BASE . 'index.php');
+            exit;
+        }
+        $error = '密码错误，请重试';
+    }
+
+    show_login_page($error);
+}
+
+// ═══════════════════════════════════════
+// API 接口 (需认证)
+// ═══════════════════════════════════════
+function handle_api(): void {
+    require_auth();
+
+    $cmd = $_GET['cmd'] ?? '';
+    header('Content-Type: application/json; charset=utf-8');
+
+    switch ($cmd) {
+        case 'stats':
+            echo json_encode(get_stats(), JSON_UNESCAPED_UNICODE);
+            break;
+        case 'logs':
+            $type = $_GET['type'] ?? 'today';
+            $file = $type === 'today' ? get_today_log_file() : (PROJECT_ROOT . '/file/log/' . basename($type));
+            echo json_encode(['content' => tail_log($file)], JSON_UNESCAPED_UNICODE);
+            break;
+        case 'clear_ratelimit':
+            clear_ratelimit();
+            echo json_encode(['ok' => true, 'message' => '限流记录已清理']);
+            break;
+        case 'clear_logs':
+            clear_logs();
+            echo json_encode(['ok' => true, 'message' => '日志已清理']);
+            break;
+        case 'clear_memory':
+            $uid = $_GET['uid'] ?? '';
+            clear_memory($uid);
+            echo json_encode(['ok' => true, 'message' => $uid ? "用户 $uid 记忆已清除" : '所有记忆已清除']);
+            break;
+        case 'log_files':
+            $files = [];
+            $logDir = PROJECT_ROOT . '/file/log/';
+            if (is_dir($logDir)) {
+                foreach (new DirectoryIterator($logDir) as $f) {
+                    if ($f->isDot()) continue;
+                    $files[] = ['name' => $f->getFilename(), 'size' => $f->getSize(), 'time' => date('Y-m-d H:i:s', $f->getMTime())];
+                }
+            }
+            rsort($files);
+            echo json_encode($files, JSON_UNESCAPED_UNICODE);
+            break;
+        case 'memory_users':
+            $users = [];
+            $memDir = PROJECT_ROOT . '/file/';
+            if (is_dir($memDir)) {
+                foreach (new DirectoryIterator($memDir) as $f) {
+                    if ($f->isDot() || !$f->isDir()) continue;
+                    $name = $f->getFilename();
+                    if (strlen($name) === 6 && ctype_digit($name)) {
+                        $users[] = ['uid' => $name, 'size' => format_bytes(dir_size($f->getPathname())), 'files' => dir_file_count($f->getPathname())];
+                    }
+                }
+            }
+            echo json_encode($users, JSON_UNESCAPED_UNICODE);
+            break;
+        default:
+            http_response_code(400);
+            echo json_encode(['error' => '未知命令']);
+    }
+    exit;
+}
+
+// ═══════════════════════════════════════
+// 统计信息
+// ═══════════════════════════════════════
+function get_stats(): array {
+    $fileDir = PROJECT_ROOT . '/file/';
+    return [
+        'php_version'    => PHP_VERSION,
+        'server_time'    => date('Y-m-d H:i:s'),
+        'disk_free'      => format_bytes(disk_free_space(PROJECT_ROOT)),
+        'memory_files'   => dir_file_count($fileDir),
+        'memory_size'    => format_bytes(dir_size($fileDir)),
+        'memory_users'   => count_memory_users(),
+        'upload_count'   => dir_file_count($fileDir, 'jpg') + dir_file_count($fileDir, 'png') + dir_file_count($fileDir, 'webp') + dir_file_count($fileDir, 'gif'),
+        'ratelimit_count'=> get_rate_limit_info()['count'],
+        'code_files'     => is_dir($fileDir . 'code/') ? dir_file_count($fileDir . 'code/') : 0,
+    ];
+}
+
+function count_memory_users(): int {
+    $dir = PROJECT_ROOT . '/file/';
+    if (!is_dir($dir)) return 0;
+    $count = 0;
+    foreach (new DirectoryIterator($dir) as $f) {
+        if ($f->isDot() || !$f->isDir()) continue;
+        $name = $f->getFilename();
+        if (strlen($name) === 6 && ctype_digit($name)) $count++;
+    }
+    return $count;
+}
+
+function clear_ratelimit(): void {
+    $dir = PROJECT_ROOT . '/file/ratelimit/';
+    if (!is_dir($dir)) return;
+    foreach (new DirectoryIterator($dir) as $f) {
+        if ($f->isDot()) continue;
+        @unlink($f->getPathname());
+    }
+}
+
+function clear_logs(): void {
+    $dir = PROJECT_ROOT . '/file/log/';
+    if (!is_dir($dir)) return;
+    foreach (new DirectoryIterator($dir) as $f) {
+        if ($f->isDot()) continue;
+        @unlink($f->getPathname());
+    }
+}
+
+function clear_memory(string $uid = ''): void {
+    $dir = PROJECT_ROOT . '/file/';
+    if ($uid && strlen($uid) === 6 && ctype_digit($uid)) {
+        $target = $dir . $uid;
+        if (is_dir($target)) array_map('unlink', glob("$target/*"));
+    } else {
+        // 只清理 6 位数字的用户目录
+        foreach (new DirectoryIterator($dir) as $f) {
+            if ($f->isDot() || !$f->isDir()) continue;
+            $name = $f->getFilename();
+            if (strlen($name) === 6 && ctype_digit($name)) {
+                array_map('unlink', glob($f->getPathname() . '/*'));
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════
+// 登录页面
+// ═══════════════════════════════════════
+function show_login_page(string $error = ''): void {
+    $errorHtml = $error ? '<div class="alert alert-error">' . htmlspecialchars($error) . '</div>' : '';
+    echo '<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>云智计算 - 后台管理登录</title>
+<link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+:root {
+    --bg: #f0f4f8;
+    --card-bg: #ffffff;
+    --text: #1a202c;
+    --muted: #718096;
+    --primary: #0f8f8c;
+    --primary-dark: #0a6f73;
+    --error: #e53e3e;
+    --line: rgba(0,0,0,0.08);
+    --shadow: 0 20px 60px rgba(0,0,0,0.12);
+}
+[data-theme="dark"] { --bg: #0f172a; --card-bg: #1e293b; --text: #e2e8f0; --muted: #94a3b8; --line: rgba(255,255,255,0.08); --shadow: 0 20px 60px rgba(0,0,0,0.5); }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+}
+.login-card {
+    background: var(--card-bg);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    padding: 2.5rem 2rem;
+    width: 100%;
+    max-width: 400px;
+    border: 1px solid var(--line);
+}
+.login-header { text-align: center; margin-bottom: 2rem; }
+.login-header .icon { font-size: 2.8rem; color: var(--primary); margin-bottom: 0.75rem; }
+.login-header h1 { font-size: 1.35rem; font-weight: 700; color: var(--text); }
+.login-header p { color: var(--muted); font-size: 0.85rem; margin-top: 0.4rem; }
+.form-group { margin-bottom: 1.25rem; }
+.form-group label { display: block; margin-bottom: 0.4rem; font-size: 0.85rem; font-weight: 600; color: var(--text); }
+.input-field {
+    width: 100%; padding: 0.8rem 1rem;
+    border: 1px solid var(--line);
+    border-radius: 12px; font-size: 1rem;
+    background: var(--card-bg); color: var(--text);
+    transition: all 0.2s;
+}
+.input-field:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(15,143,140,0.15); }
+.btn-submit {
+    width: 100%; padding: 0.85rem;
+    background: linear-gradient(135deg, var(--primary), #12a89f);
+    color: #fff; border: none; border-radius: 12px;
+    font-size: 1rem; font-weight: 600; cursor: pointer;
+    transition: all 0.2s;
+}
+.btn-submit:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(15,143,140,0.3); }
+.alert { padding: 0.75rem 1rem; border-radius: 10px; margin-bottom: 1rem; font-size: 0.85rem; }
+.alert-error { background: #fff5f5; color: var(--error); border: 1px solid #fed7d7; }
+.back-link { display: block; text-align: center; margin-top: 1.5rem; color: var(--muted); font-size: 0.8rem; text-decoration: none; }
+.back-link:hover { color: var(--primary); }
+</style>
+</head>
+<body>
+<div class="login-card">
+    <div class="login-header">
+        <div class="icon"><i class="fa-solid fa-shield-halved"></i></div>
+        <h1>云智计算 后台管理</h1>
+        <p>请输入管理员密码登录</p>
+    </div>
+    ' . $errorHtml . '
+    <form method="post">
+        <div class="form-group">
+            <label for="password">管理员密码</label>
+            <input type="password" id="password" name="password" class="input-field" placeholder="请输入密码" autofocus required>
+        </div>
+        <button type="submit" class="btn-submit">
+            <i class="fa-solid fa-right-to-bracket mr-2"></i>登录后台
+        </button>
+    </form>
+    <a href="../" class="back-link"><i class="fa-solid fa-arrow-left mr-1"></i>返回对话平台</a>
+</div>
+</body>
+</html>';
+    exit;
+}
+
+// ═══════════════════════════════════════
+// 仪表盘页面
+// ═══════════════════════════════════════
+function show_dashboard(): void {
+    $config = include PROJECT_ROOT . '/config.php';
+    $stats = get_stats();
+    $rateInfo = get_rate_limit_info();
+    $logContent = tail_log(get_today_log_file(), 80);
+
+    // API Key 脱敏
+    $apiKey = $config['api']['key'] ?? '';
+    $maskedKey = substr($apiKey, 0, 8) . '****' . substr($apiKey, -4);
+
+    $modules = $config['modules'] ?? [];
+    $moduleCount = count($modules);
+
+    echo '<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>云智计算 - 后台管理面板</title>
+<link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+:root {
+    --bg: #f0f4f8;
+    --card-bg: #ffffff;
+    --text: #1a202c;
+    --muted: #718096;
+    --primary: #0f8f8c;
+    --primary-dark: #0a6f73;
+    --accent: #e45f3d;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --error: #ef4444;
+    --line: rgba(0,0,0,0.07);
+    --shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh; -webkit-font-smoothing: antialiased;
+}
+/* ── 顶栏 ── */
+.topbar {
+    background: var(--card-bg); border-bottom: 1px solid var(--line);
+    padding: 0 1.5rem; height: 56px; display: flex; align-items: center;
+    justify-content: space-between; position: sticky; top: 0; z-index: 100;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+.topbar h1 { font-size: 1.1rem; font-weight: 700; }
+.topbar h1 i { color: var(--primary); margin-right: 0.4rem; }
+.topbar .actions { display: flex; gap: 0.75rem; align-items: center; }
+.btn { padding: 0.45rem 0.9rem; border-radius: 8px; font-size: 0.8rem; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem; }
+.btn-ghost { background: none; color: var(--muted); border: 1px solid var(--line); }
+.btn-ghost:hover { background: rgba(0,0,0,0.04); color: var(--text); }
+.btn-danger { background: var(--error); color: #fff; }
+.btn-danger:hover { background: #dc2626; }
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-dark); }
+.btn-sm { padding: 0.25rem 0.6rem; font-size: 0.7rem; border-radius: 6px; }
+/* ── 主布局 ── */
+.layout { max-width: 1280px; margin: 0 auto; padding: 1.5rem; display: grid; gap: 1.25rem; }
+/* ── 统计卡片 ── */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+.stat-card {
+    background: var(--card-bg); border-radius: 14px; padding: 1.2rem 1.25rem;
+    border: 1px solid var(--line); box-shadow: var(--shadow);
+    display: flex; align-items: flex-start; gap: 1rem;
+}
+.stat-icon { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0; }
+.stat-icon.blue { background: #dbeafe; color: #2563eb; }
+.stat-icon.green { background: #d1fae5; color: #059669; }
+.stat-icon.amber { background: #fef3c7; color: #d97706; }
+.stat-icon.red { background: #fee2e2; color: #dc2626; }
+.stat-icon.purple { background: #ede9fe; color: #7c3aed; }
+.stat-value { font-size: 1.6rem; font-weight: 800; line-height: 1.2; }
+.stat-label { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; }
+/* ── 面板卡片 ── */
+.panel {
+    background: var(--card-bg); border-radius: 14px; border: 1px solid var(--line);
+    box-shadow: var(--shadow); overflow: hidden;
+}
+.panel-header {
+    padding: 1rem 1.25rem; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between;
+    font-weight: 700; font-size: 0.95rem;
+}
+.panel-body { padding: 1rem 1.25rem; }
+.panel-body.scroll { max-height: 360px; overflow-y: auto; }
+/* ── 日志 ── */
+.log-viewer {
+    background: #1e293b; color: #e2e8f0; border-radius: 10px;
+    padding: 1rem; font-family: "Fira Code", "Consolas", monospace;
+    font-size: 0.75rem; line-height: 1.6; white-space: pre-wrap;
+    overflow-x: auto; max-height: 280px; overflow-y: auto;
+}
+/* ── 表格 ── */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+th, td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid var(--line); }
+th { font-weight: 700; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+tr:hover { background: rgba(0,0,0,0.02); }
+.badge {
+    display: inline-block; padding: 0.15rem 0.55rem; border-radius: 6px;
+    font-size: 0.7rem; font-weight: 700;
+}
+.badge-success { background: #d1fae5; color: #065f46; }
+.badge-warning { background: #fef3c7; color: #92400e; }
+.badge-error { background: #fee2e2; color: #991b1b; }
+/* ── 网格 ── */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+@media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+/* ── toast ── */
+.toast {
+    position: fixed; top: 1rem; left: 50%; transform: translateX(-50%);
+    padding: 0.6rem 1.25rem; border-radius: 20px; font-size: 0.85rem;
+    font-weight: 600; z-index: 999; box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    animation: slideDown 0.3s ease;
+}
+.toast-success { background: var(--success); color: #fff; }
+.toast-error { background: var(--error); color: #fff; }
+@keyframes slideDown { from { opacity: 0; transform: translateX(-50%) translateY(-20px); } }
+</style>
+</head>
+<body>
+<div class="topbar">
+    <h1><i class="fa-solid fa-gauge-high"></i>云智计算 后台管理</h1>
+    <div class="actions">
+        <a href="../" class="btn btn-ghost"><i class="fa-solid fa-comments"></i>对话平台</a>
+        <a href="?action=logout" class="btn btn-ghost"><i class="fa-solid fa-right-from-bracket"></i>退出</a>
+    </div>
+</div>
+
+<div class="layout">
+    <!-- 统计卡片 -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon blue"><i class="fa-solid fa-users"></i></div>
+            <div><div class="stat-value">' . $stats['memory_users'] . '</div><div class="stat-label">活跃用户记忆</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon green"><i class="fa-solid fa-file-lines"></i></div>
+            <div><div class="stat-value">' . $stats['memory_files'] . '</div><div class="stat-label">记忆文件总数</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon amber"><i class="fa-solid fa-gauge"></i></div>
+            <div><div class="stat-value">' . $stats['ratelimit_count'] . '</div><div class="stat-label">限流记录</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon purple"><i class="fa-solid fa-database"></i></div>
+            <div><div class="stat-value">' . $stats['memory_size'] . '</div><div class="stat-label">记忆数据总量</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon blue"><i class="fa-solid fa-code"></i></div>
+            <div><div class="stat-value">' . $stats['code_files'] . '</div><div class="stat-label">代码文件</div></div>
+        </div>
+    </div>
+
+    <!-- 系统信息 + 配置 -->
+    <div class="grid-2">
+        <div class="panel">
+            <div class="panel-header"><i class="fa-solid fa-server mr-2"></i>系统信息</div>
+            <div class="panel-body">
+                <table>
+                    <tr><td style="color:var(--muted)">PHP 版本</td><td><strong>' . $stats['php_version'] . '</strong></td></tr>
+                    <tr><td style="color:var(--muted)">服务器时间</td><td>' . $stats['server_time'] . '</td></tr>
+                    <tr><td style="color:var(--muted)">磁盘可用</td><td>' . $stats['disk_free'] . '</td></tr>
+                    <tr><td style="color:var(--muted)">模块数量</td><td>' . $moduleCount . ' 个</td></tr>
+                    <tr><td style="color:var(--muted)">上传文件</td><td>' . $stats['upload_count'] . ' 个</td></tr>
+                </table>
+            </div>
+        </div>
+        <div class="panel">
+            <div class="panel-header"><i class="fa-solid fa-key mr-2"></i>API 配置</div>
+            <div class="panel-body">
+                <table>
+                    <tr><td style="color:var(--muted)">API 端点</td><td><span style="font-family:monospace;font-size:0.78rem">' . htmlspecialchars($config['api']['url']) . '</span></td></tr>
+                    <tr><td style="color:var(--muted)">API Key</td><td><span class="badge badge-warning">' . htmlspecialchars($maskedKey) . '</span></td></tr>
+                    <tr><td style="color:var(--muted)">超时时间</td><td>' . ($config['api']['timeout'] ?? 'N/A') . 's</td></tr>
+                    <tr><td style="color:var(--muted)">限流窗口</td><td>' . ($config["security"]["rate_limit"]["window"] ?? "N/A") . 's / ' . ($config["security"]["rate_limit"]["max_reqs"] ?? "N/A") . '次</td></tr>
+                    <tr><td style="color:var(--muted)">最大问题长度</td><td>' . ($config["security"]["max_question_length"] ?? "N/A") . ' 字符</td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模块配置 -->
+    <div class="panel">
+        <div class="panel-header"><i class="fa-solid fa-cubes mr-2"></i>AI 模块配置 (' . $moduleCount . ' 个)</div>
+        <div class="panel-body scroll">
+            <div class="table-wrap">
+            <table>
+                <thead><tr><th>模块</th><th>模型</th><th>最大 Tokens</th><th>系统提示词 (前 80 字符)</th></tr></thead>
+                <tbody>';
+    foreach ($modules as $name => $mod) {
+        $sysPreview = mb_substr($mod['system'] ?? '', 0, 80) . '…';
+        echo '<tr>
+            <td><span class="badge badge-success">' . htmlspecialchars($name) . '</span></td>
+            <td><code style="font-size:0.78rem">' . htmlspecialchars($mod['model'] ?? '-') . '</code></td>
+            <td>' . (int)($mod['max_tokens'] ?? 0) . '</td>
+            <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' . htmlspecialchars($sysPreview) . '</td>
+        </tr>';
+    }
+    echo '</tbody></table></div></div></div>';
+
+    // 操作区
+    echo '
+    <div class="grid-2">
+        <div class="panel">
+            <div class="panel-header">
+                <span><i class="fa-solid fa-broom mr-2"></i>快速操作</span>
+            </div>
+            <div class="panel-body" style="display:flex;flex-wrap:wrap;gap:0.6rem;">
+                <button class="btn btn-sm btn-ghost" onclick="apiAction(\'clear_ratelimit\')"><i class="fa-solid fa-gauge"></i> 清理限流记录</button>
+                <button class="btn btn-sm btn-ghost" onclick="apiAction(\'clear_logs\')"><i class="fa-solid fa-eraser"></i> 清理日志文件</button>
+                <button class="btn btn-sm btn-ghost" onclick="apiAction(\'clear_memory\')"><i class="fa-solid fa-trash-can"></i> 清理所有记忆</button>
+                <button class="btn btn-sm btn-ghost" onclick="location.reload()"><i class="fa-solid fa-rotate"></i> 刷新面板</button>
+            </div>
+        </div>
+        <div class="panel">
+            <div class="panel-header">
+                <span><i class="fa-solid fa-triangle-exclamation mr-2"></i>限流状态</span>
+                <span class="badge ' . ($rateInfo['count'] > 10 ? 'badge-error' : 'badge-success') . '">' . $rateInfo['count'] . ' 条</span>
+            </div>
+            <div class="panel-body scroll" style="max-height:180px;">';
+    if ($rateInfo['count'] === 0) {
+        echo '<p style="color:var(--muted);text-align:center;padding:2rem 0">暂无活跃限流记录</p>';
+    } else {
+        echo '<div class="table-wrap"><table><thead><tr><th>IP / 标识</th><th>大小</th><th>更新时间</th></tr></thead><tbody>';
+        foreach (array_slice($rateInfo['files'], 0, 50) as $f) {
+            echo '<tr><td><code>' . htmlspecialchars($f['name']) . '</code></td><td>' . $f['size'] . ' B</td><td>' . $f['time'] . '</td></tr>';
+        }
+        echo '</tbody></table></div>';
+    }
+    echo '</div></div></div>';
+
+    // 日志查看器
+    echo '
+    <div class="panel">
+        <div class="panel-header">
+            <span><i class="fa-solid fa-scroll mr-2"></i>错误日志 (' . date('Y-m-d') . ')</span>
+            <button class="btn btn-sm btn-ghost" onclick="refreshLogs()"><i class="fa-solid fa-rotate"></i> 刷新</button>
+        </div>
+        <div class="panel-body">
+            <div class="log-viewer" id="log-viewer">' . htmlspecialchars($logContent ?: '暂无日志') . '</div>
+        </div>
+    </div>';
+    ?>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+async function apiAction(cmd, extra = '') {
+    try {
+        const resp = await fetch('?action=api&cmd=' + cmd + extra);
+        const data = await resp.json();
+        showToast(data.message || data.error || '完成', data.ok !== false && !data.error);
+        setTimeout(() => location.reload(), 800);
+    } catch (e) {
+        showToast('请求失败: ' + e.message, false);
+    }
+}
+async function refreshLogs() {
+    try {
+        const resp = await fetch('?action=api&cmd=logs&type=today');
+        const data = await resp.json();
+        document.getElementById('log-viewer').textContent = data.content || '暂无日志';
+        showToast('日志已刷新', true);
+    } catch (e) {
+        showToast('刷新失败', false);
+    }
+}
+function showToast(msg, ok = true) {
+    const el = document.createElement('div');
+    el.className = 'toast ' + (ok ? 'toast-success' : 'toast-error');
+    el.textContent = msg;
+    document.getElementById('toast-container').appendChild(el);
+    setTimeout(() => el.remove(), 2500);
+}
+</script>
+</body>
+</html>
+<?php
+    exit;
+}
