@@ -741,6 +741,45 @@
         .drag-drop-icon { font-size: 2.5rem; color: var(--color-primary); margin-bottom: 1rem; }
         .drag-drop-text { color: #6b7280; margin-bottom: 1rem; }
         .drag-drop-hint { font-size: 0.875rem; color: #9ca3af; }
+        .history-list {
+            display: grid;
+            gap: 0.75rem;
+        }
+        .history-item {
+            width: 100%;
+            border: 1px solid rgba(103, 117, 137, 0.18);
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.82);
+            padding: 0.9rem 1rem;
+            text-align: left;
+            transition: var(--transition-normal);
+        }
+        .history-item:hover {
+            border-color: rgba(15, 143, 140, 0.3);
+            box-shadow: var(--shadow-sm);
+            transform: translateY(-1px);
+        }
+        .history-title {
+            color: var(--color-ink);
+            font-weight: 700;
+            line-height: 1.35;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .history-meta {
+            color: var(--color-muted);
+            font-size: 0.78rem;
+            margin-top: 0.35rem;
+        }
+        .history-empty {
+            border: 1px dashed rgba(103, 117, 137, 0.28);
+            border-radius: 14px;
+            color: var(--color-muted);
+            padding: 2rem 1rem;
+            text-align: center;
+            background: rgba(248, 252, 249, 0.72);
+        }
         .thinking-indicator {
             display: inline-flex;
             align-items: center;
@@ -1233,6 +1272,31 @@
             </div>
         </div>
     </div>
+    <div id="history-modal" class="fixed inset-0 bg-black/50 backdrop-blur flex items-center justify-center z-50 hidden">
+        <div class="modal-content max-w-[90%] w-[560px] max-h-[82vh] overflow-hidden flex flex-col">
+            <div class="modal-header flex justify-between items-center">
+                <h3 class="text-lg font-semibold text-gray-800">
+                    <i class="fa-solid fa-clock-rotate-left text-primary-500 mr-2"></i>历史对话
+                </h3>
+                <button class="text-gray-500 hover:text-gray-700 transition" aria-label="关闭历史对话" onclick="closeModal('history-modal')">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-body overflow-y-auto flex-1 scrollbar-thin">
+                <div class="relative mb-3">
+                    <input type="text" id="history-search" placeholder="搜索历史对话..." class="input-field pl-10" aria-label="搜索历史对话">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true"></i>
+                </div>
+                <div id="history-list" class="history-list"></div>
+            </div>
+            <div class="modal-footer flex justify-between gap-3">
+                <button class="px-4 py-2 btn-secondary rounded-lg" onclick="clearConversationHistoryStore()">
+                    <i class="fa-solid fa-trash-can mr-2"></i>清空历史
+                </button>
+                <button class="px-4 py-2 btn-primary rounded-lg" onclick="closeModal('history-modal')">完成</button>
+            </div>
+        </div>
+    </div>
     <div id="language-select-modal" class="fixed inset-0 bg-black/50 backdrop-blur flex items-center justify-center z-50 hidden">
         <div class="modal-content max-w-[90%] w-[500px] max-h-[80vh] overflow-hidden flex flex-col">
             <div class="modal-header flex justify-between items-center">
@@ -1315,6 +1379,9 @@
         <button onclick="createNewConversation()" class="p-2 rounded-lg hover:bg-gray-100 transition flex items-center gap-1 text-sm font-medium text-gray-600" aria-label="新增对话">
             <i class="fa-solid fa-plus"></i>新增<span class="hidden md:inline">对话</span>
         </button>
+        <button onclick="showModal('history-modal')" class="p-2 rounded-lg hover:bg-gray-100 transition flex items-center gap-1 text-sm font-medium text-gray-600" aria-label="查看历史对话">
+            <i class="fa-solid fa-clock-rotate-left"></i>历史<span class="hidden md:inline">记录</span>
+        </button>
         <div class="title-container">
             <div class="title-text-wrapper">
                 <div id="title-text" class="title-text-content"></div>
@@ -1394,6 +1461,8 @@ const MAX_QUESTION_LENGTH = 30000;
 const MAX_RETRY_TIMES = 2;
 const RETRY_DELAY_BASE = 800;
 const NETWORK_TIMEOUT_MS = 120000;
+const LOCAL_HISTORY_KEY = 'yunzhi_chat_history_v1';
+const LOCAL_HISTORY_LIMIT = 30;
 // 全局未捕获异常处理 防止页面白屏
 window.addEventListener('error', (event) => {
     console.error('未捕获异常', event.message);
@@ -1469,7 +1538,9 @@ let currentEditContainer = null;
 let codeEditingLocked = false;
 let requirementEditingLocked = false;
 let isSubmitting = false;
+let currentConversationId = generateConversationId();
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;function generateMemoryId() { return Math.floor(100000 + Math.random() * 900000).toString(); }
+function generateConversationId() { return `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
 function highlightDropArea(area) { area?.classList.add('dragover'); }
 function unhighlightDropArea(area) { area?.classList.remove('dragover'); }
@@ -1485,13 +1556,126 @@ function isValidUrl(string) {
         return false;
     }
 }
+function getSavedConversations() {
+    try {
+        const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+        return [];
+    }
+}
+function hasRealConversationContent(messages = conversationHistory) {
+    return messages.some(item => item.question || item.attachment);
+}
+function buildConversationTitle(messages = conversationHistory) {
+    const firstTurn = messages.find(item => item.question || item.attachment);
+    if (!firstTurn) return '新对话';
+    const title = firstTurn.question || (firstTurn.attachment?.type === 'image' ? '图片对话' : '文件对话');
+    return title.replace(/\s+/g, ' ').trim().slice(0, 40) || '新对话';
+}
+function persistCurrentConversation() {
+    if (!hasRealConversationContent()) return;
+    const saved = getSavedConversations().filter(item => item.id !== currentConversationId);
+    const record = {
+        id: currentConversationId,
+        title: buildConversationTitle(),
+        updatedAt: Date.now(),
+        memoryId,
+        messages: JSON.parse(JSON.stringify(conversationHistory))
+    };
+    try {
+        localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify([record, ...saved].slice(0, LOCAL_HISTORY_LIMIT)));
+    } catch (e) {
+        showCopyFeedback('本地历史保存失败，请清理浏览器存储空间', true);
+    }
+}
+function renderConversation(messages) {
+    chatMessages.innerHTML = '';
+    messages.forEach((item, idx) => {
+        if (item.question || item.attachment) chatMessages.appendChild(createMessageElement('user', item.question, userAvatar, idx, item.attachment));
+        const aiMsg = createMessageElement('ai', '', aiAvatar);
+        const contentDiv = aiMsg.querySelector('.message-content');
+        if (!contentDiv) return;
+        if (item.answer?.startsWith('http') && isValidUrl(item.answer)) handleImageResponse(item.answer, aiMsg, contentDiv);
+        else {
+            contentDiv.innerHTML = renderMarkdown(item.answer || '');
+            highlightCodeBlocks(contentDiv);
+            addActionButtons(aiMsg, item.answer || '', idx === 0 && !item.question && !item.attachment);
+        }
+        chatMessages.appendChild(aiMsg);
+    });
+    scrollToBottom();
+}
+function restoreLatestConversation() {
+    const latest = getSavedConversations()[0];
+    if (!latest?.messages?.length) return false;
+    currentConversationId = latest.id || generateConversationId();
+    memoryId = latest.memoryId || generateMemoryId();
+    conversationHistory = JSON.parse(JSON.stringify(latest.messages));
+    renderConversation(conversationHistory);
+    return true;
+}
+function renderHistoryList() {
+    const list = document.getElementById('history-list');
+    if (!list) return;
+    const term = (document.getElementById('history-search')?.value || '').trim().toLowerCase();
+    const conversations = getSavedConversations().filter(item => !term || (item.title || '').toLowerCase().includes(term));
+    if (conversations.length === 0) {
+        list.innerHTML = '<div class="history-empty">暂无历史对话</div>';
+        return;
+    }
+    list.innerHTML = conversations.map(item => {
+        const date = new Date(item.updatedAt || Date.now());
+        const turnCount = (item.messages || []).filter(message => message.question || message.attachment).length;
+        return `<div class="history-item">
+            <button class="w-full text-left" onclick="loadConversationFromHistory('${escapeHtml(item.id)}')">
+                <div class="history-title">${escapeHtml(item.title || '新对话')}</div>
+                <div class="history-meta">${date.toLocaleString()} · ${turnCount} 条消息</div>
+            </button>
+            <button class="mt-3 text-sm text-error hover:underline" onclick="deleteConversationFromHistory('${escapeHtml(item.id)}')">
+                <i class="fa-solid fa-trash-can mr-1"></i>删除
+            </button>
+        </div>`;
+    }).join('');
+}
+function loadConversationFromHistory(id) {
+    const record = getSavedConversations().find(item => item.id === id);
+    if (!record?.messages?.length) return;
+    if (typingEffectActive) stopAIResponse();
+    if (window.speechSynthesis?.speaking) window.speechSynthesis.cancel();
+    currentConversationId = record.id;
+    memoryId = record.memoryId || generateMemoryId();
+    conversationHistory = JSON.parse(JSON.stringify(record.messages));
+    originalConversationHistory = [];
+    editingMessageIndex = -1;
+    uploadedImage = null;
+    uploadedFiles = [];
+    updateAttachmentPreview();
+    renderConversation(conversationHistory);
+    closeModal('history-modal');
+    showCopyFeedback('已载入历史对话');
+}
+function deleteConversationFromHistory(id) {
+    const next = getSavedConversations().filter(item => item.id !== id);
+    localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(next));
+    renderHistoryList();
+    showCopyFeedback('已删除历史对话');
+}
+function clearConversationHistoryStore() {
+    localStorage.removeItem(LOCAL_HISTORY_KEY);
+    renderHistoryList();
+    showCopyFeedback('已清空历史对话');
+}
 function createNewConversation() {
     if (codeModeActive) {
         showCopyFeedback('请先退出代码编程模式后再创建新对话', true);
         return;
     }
+    persistCurrentConversation();
     if (typingEffectActive) stopAIResponse();
     if (window.speechSynthesis?.speaking) window.speechSynthesis.cancel();
+    currentConversationId = generateConversationId();
     memoryId = generateMemoryId();
     conversationHistory = [];
     chatMessages.innerHTML = '';
@@ -1519,7 +1703,7 @@ function init() {
     }
     setupEventListeners();
     populateLanguageList();
-    showWelcomeMessage();
+    if (!restoreLatestConversation()) showWelcomeMessage();
     startTitleAnimation();
     updateSubmitButtonState();
     // 输入框最大长度限制 与服务端保持一致
@@ -1601,6 +1785,7 @@ function setupEventListeners() {
     chatMessages.addEventListener('scroll', handleChatScroll, { passive: true });
     ocrFileInput.addEventListener('change', handleOCRImageUpload);
     document.getElementById('language-search')?.addEventListener('input', filterLanguages);
+    document.getElementById('history-search')?.addEventListener('input', renderHistoryList);
     attachmentPreviewArea.addEventListener('click', (e) => {
         const removeBtn = e.target.closest('.remove-attachment-btn');
         if (!removeBtn) return;
@@ -1705,6 +1890,7 @@ function showModal(modalId) {
     document.body.classList.add('overflow-hidden');
     if (modalId === 'disclaimer-modal') document.getElementById('disclaimer-content').innerHTML = DISCLAIMER_CONTENT;
     else if (modalId === 'ocr-upload-modal') resetOCRModal();
+    else if (modalId === 'history-modal') renderHistoryList();
 }
 function closeModal(modalId) {
     const modal = document.getElementById(modalId);
@@ -2088,6 +2274,7 @@ ${codeModeOptimizedRequirement}
             answer: codeText,
             attachment: null
         });
+        persistCurrentConversation();
         const messageDiv = appendMessage('ai', '', aiAvatar, -1, null, true);
         const contentDiv = messageDiv.querySelector('.message-content');
         if (contentDiv) {
@@ -2198,20 +2385,7 @@ function cancelEdit() {
     conversationHistory = JSON.parse(JSON.stringify(originalConversationHistory));
     originalConversationHistory = [];
     editingMessageIndex = -1;
-    chatMessages.innerHTML = '';
-    conversationHistory.forEach((item, idx) => {
-        if (item.question || item.attachment) chatMessages.appendChild(createMessageElement('user', item.question, userAvatar, idx, item.attachment));
-        const aiMsg = createMessageElement('ai', '', aiAvatar);
-        const contentDiv = aiMsg.querySelector('.message-content');
-        if (!contentDiv) return;
-        if (item.answer?.startsWith('http') && isValidUrl(item.answer)) handleImageResponse(item.answer, aiMsg, contentDiv);
-        else {
-            contentDiv.innerHTML = renderMarkdown(item.answer || '');
-            highlightCodeBlocks(contentDiv);
-            addActionButtons(aiMsg, item.answer || '', idx === 0 && !item.question && !item.attachment);
-        }
-        chatMessages.appendChild(aiMsg);
-    });
+    renderConversation(conversationHistory);
     userInput.value = '';
     userInput.style.height = 'auto';
     cancelEditBtn.classList.add('hidden');
@@ -2528,6 +2702,7 @@ async function getAIResponse(userText, attachment = null) {
         const messageDiv = appendMessage('ai', '', aiAvatar, -1, null, true);
         const contentDiv = messageDiv.querySelector('.message-content');
         conversationHistory[conversationHistory.length - 1].answer = aiText;
+        persistCurrentConversation();
         if (currentMode === 'image' && isValidUrl(aiText)) handleImageResponse(aiText, messageDiv, contentDiv);
         else if (contentDiv) typeWriterEffect(contentDiv, aiText, () => addActionButtons(messageDiv, aiText));
         if (editingMessageIndex >= 0) {
@@ -2540,6 +2715,7 @@ async function getAIResponse(userText, attachment = null) {
         if (error.name === 'AbortError') return;
         const friendlyMessage = getFriendlyErrorMessage(error);
         conversationHistory[conversationHistory.length - 1].answer = friendlyMessage;
+        persistCurrentConversation();
         const errorDiv = appendMessage('ai', '', aiAvatar);
         const contentEl = errorDiv.querySelector('.message-content');
         if (contentEl) contentEl.innerHTML = `<div class="flex items-start gap-2 text-error"><i class="fa-solid fa-circle-exclamation mt-1"></i><span>${escapeHtml(friendlyMessage)}</span></div>`;
