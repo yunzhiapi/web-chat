@@ -129,7 +129,7 @@ function tail_log(string $file, int $lines = 100): string {
 function get_today_log_file(): string {
     $logDir = PROJECT_ROOT . '/file/log/';
     $today = date('Y-m-d');
-    return $logDir . 'error-' . $today . '.log';
+    return $logDir . $today . '.log';
 }
 
 // ── 获取限流状态 ──
