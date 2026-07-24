@@ -1800,6 +1800,19 @@ function deleteConversationFromHistory(id) {
     renderHistoryList();
     showCopyFeedback('已删除历史对话');
 }
+function deleteMessageFromActions(aiMessageDiv) {
+    // 找到前一个用户消息，获取其索引
+    let prev = aiMessageDiv.previousElementSibling;
+    while (prev && !prev.classList.contains('justify-end')) prev = prev.previousElementSibling;
+    const msgIndex = prev ? parseInt(prev.dataset.messageIndex) : -1;
+    if (msgIndex >= 0 && msgIndex < conversationHistory.length) {
+        conversationHistory.splice(msgIndex, 1);
+    }
+    if (prev) prev.remove();
+    aiMessageDiv.remove();
+    persistCurrentConversation();
+    showCopyFeedback('已删除消息');
+}
 function clearConversationHistoryStore() {
     localStorage.removeItem(LOCAL_HISTORY_KEY);
     renderHistoryList();
