@@ -149,3 +149,45 @@ function get_rate_limit_info(): array {
     }
     return ['count' => $totalCount, 'files' => $files];
 }
+
+// ── Token 用量统计 ──
+function get_token_stats(): array {
+    $tokenFile = PROJECT_ROOT . '/file/log/token_usage.json';
+    $today = date('Y-m-d');
+    $total = ['prompt' => 0, 'completion' => 0, 'total' => 0, 'calls' => 0];
+    $todayStats = ['prompt' => 0, 'completion' => 0, 'total' => 0, 'calls' => 0];
+    $byModel = [];
+    $recent = [];
+
+    if (!is_file($tokenFile)) return compact('total', 'todayStats', 'byModel', 'recent');
+
+    $raw = @file_get_contents($tokenFile);
+    $data = $raw !== false ? json_decode($raw, true) : null;
+    if (!is_array($data)) return compact('total', 'todayStats', 'byModel', 'recent');
+
+    foreach ($data as $r) {
+        $total['prompt'] += (int)($r['prompt'] ?? 0);
+        $total['completion'] += (int)($r['completion'] ?? 0);
+        $total['total'] += (int)($r['total'] ?? 0);
+        $total['calls']++;
+
+        if (($r['date'] ?? '') === $today) {
+            $todayStats['prompt'] += (int)($r['prompt'] ?? 0);
+            $todayStats['completion'] += (int)($r['completion'] ?? 0);
+            $todayStats['total'] += (int)($r['total'] ?? 0);
+            $todayStats['calls']++;
+        }
+
+        $model = $r['model'] ?? 'unknown';
+        if (!isset($byModel[$model])) $byModel[$model] = ['prompt' => 0, 'completion' => 0, 'total' => 0, 'calls' => 0];
+        $byModel[$model]['prompt'] += (int)($r['prompt'] ?? 0);
+        $byModel[$model]['completion'] += (int)($r['completion'] ?? 0);
+        $byModel[$model]['total'] += (int)($r['total'] ?? 0);
+        $byModel[$model]['calls']++;
+    }
+
+    // 最近 20 条
+    $recent = array_slice(array_reverse($data), 0, 20);
+
+    return compact('total', 'todayStats', 'byModel', 'recent');
+}

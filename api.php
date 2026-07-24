@@ -153,6 +153,31 @@ function saveHistory($file, $history, $maxRounds) {
     if (!is_dir($dir)) mkdir($dir, 0755, true);
     file_put_contents($file, gzencode(json_encode($compact, JSON_UNESCAPED_UNICODE), 6), LOCK_EX);
 }
+// Token 用量记录
+function logTokenUsage($action, $model, $uid, $usage, $config) {
+    $logDir = rtrim(($config['security']['log']['dir'] ?? __DIR__ . '/file/log/'), '/') . '/';
+    $tokenFile = $logDir . 'token_usage.json';
+    $record = [
+        'time'   => date('Y-m-d H:i:s'),
+        'date'   => date('Y-m-d'),
+        'action' => $action,
+        'model'  => $model,
+        'uid'    => $uid,
+        'prompt'     => (int)($usage['prompt_tokens'] ?? 0),
+        'completion' => (int)($usage['completion_tokens'] ?? 0),
+        'total'      => (int)($usage['total_tokens'] ?? 0),
+    ];
+    $data = [];
+    if (is_file($tokenFile)) {
+        $raw = @file_get_contents($tokenFile);
+        $decoded = $raw !== false ? json_decode($raw, true) : null;
+        if (is_array($decoded)) $data = $decoded;
+    }
+    $data[] = $record;
+    // 只保留最近 10000 条记录
+    if (count($data) > 10000) $data = array_slice($data, -10000);
+    @file_put_contents($tokenFile, json_encode($data, JSON_UNESCAPED_UNICODE), LOCK_EX);
+}
 // 共享记忆模块 默认对话 深度思考 联网搜索 搜题解答 帮我写作 图片理解共用一份记忆 代码编程独立记忆
 function memoryFileFor($action, $uid, $config) {
     if (in_array($action, $config['memory']['shared_modules'], true)) {
@@ -209,7 +234,8 @@ function callChatApi($config, array $payload, $timeout = null) {
         return [null, '模型未返回有效内容，请换个问法重试', 502];
     }
     $content = preg_replace('/\n{3,}/', "\n\n", trim($content));
-    return [$content, null, 200, $data['choices'][0]['message'] ?? []];
+    $usage = $data['usage'] ?? null;
+    return [$content, null, 200, $data['choices'][0]['message'] ?? [], $usage];
 }
 
 // 从模型响应中提取图片 支持Base64或直链
@@ -388,8 +414,9 @@ if ($action === 'ocr') {
         'messages'   => array_merge($history, [$currentMessage]),
         'max_tokens' => $module['max_tokens'],
     ];
-    [$content, $err, $code] = callChatApi($config, $payload);
+    [$content, $err, $code, $usage] = callChatApi($config, $payload);
     if ($err) respondError($err, $code, $type);
+    if ($usage) logTokenUsage($action, $module['model'], $uid, $usage, $config);
     // 多模态消息扁平化为文本存储 保证共享记忆可被纯文本模型复用
     $history[] = ['role' => 'user', 'content' => ($mediaType === 'image' ? '[图片] ' : '[视频] ') . $question];
     $history[] = ['role' => 'assistant', 'content' => $content];
@@ -414,8 +441,9 @@ $payload = [
 ];
 if (isset($module['temperature'])) $payload['temperature'] = $module['temperature'];
 
-[$content, $err, $code] = callChatApi($config, $payload);
+[$content, $err, $code, $usage] = callChatApi($config, $payload);
 if ($err) respondError($err, $code, $type);
+if ($usage) logTokenUsage($action, $module['model'], $uid, $usage, $config);
 
 if ($memoryFile) {
     $history[] = ['role' => 'user', 'content' => $question];

@@ -397,6 +397,7 @@ function show_dashboard(): void {
     $stats = get_stats();
     $rateInfo = get_rate_limit_info();
     $logContent = tail_log(get_today_log_file(), 80);
+    $tokenStats = get_token_stats();
 
     // API Key 脱敏
     $apiKey = $config['api']['key'] ?? '';
@@ -593,6 +594,30 @@ tr:hover { background: rgba(0,0,0,0.02); }
 </div>
 
 <div class="layout">
+    <!-- ── Token 用量统计 ── -->
+    <div class="stats-grid" style="margin-bottom:0.25rem">
+        <div class="stat-card">
+            <div class="stat-icon blue"><i class="fa-solid fa-coins"></i></div>
+            <div><div class="stat-value">' . number_format($tokenStats['todayStats']['total']) . '</div><div class="stat-label">今日 Token</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon green"><i class="fa-solid fa-chart-bar"></i></div>
+            <div><div class="stat-value">' . ($tokenStats['todayStats']['calls'] > 0 ? number_format($tokenStats['todayStats']['total'] / $tokenStats['todayStats']['calls']) : 0) . '</div><div class="stat-label">今日平均/次</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon amber"><i class="fa-solid fa-phone"></i></div>
+            <div><div class="stat-value">' . $tokenStats['todayStats']['calls'] . '</div><div class="stat-label">今日调用次数</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon purple"><i class="fa-solid fa-database"></i></div>
+            <div><div class="stat-value">' . number_format($tokenStats['total']['total']) . '</div><div class="stat-label">累计 Token</div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon blue"><i class="fa-solid fa-calculator"></i></div>
+            <div><div class="stat-value">' . ($tokenStats['total']['calls'] > 0 ? number_format($tokenStats['total']['total'] / $tokenStats['total']['calls']) : 0) . '</div><div class="stat-label">累计平均/次</div></div>
+        </div>
+    </div>
+
     <!-- 统计卡片 -->
     <div class="stats-grid">
         <div class="stat-card">
@@ -672,6 +697,28 @@ tr:hover { background: rgba(0,0,0,0.02); }
             </form>
         </div>
     </div>';
+
+    // ── 分模型 Token 统计 ──
+    if (count($tokenStats['byModel']) > 0) {
+        echo '<div class="panel" style="margin-bottom:1.25rem">
+            <div class="panel-header"><i class="fa-solid fa-microchip mr-2"></i>分模型 Token 用量</div>
+            <div class="panel-body scroll" style="max-height:260px">
+                <div class="table-wrap"><table>
+                <thead><tr><th>模型</th><th>调用次数</th><th>Prompt</th><th>Completion</th><th>合计</th><th>平均/次</th></tr></thead><tbody>';
+        arsort($tokenStats['byModel']);
+        foreach ($tokenStats['byModel'] as $model => $m) {
+            $avg = $m['calls'] > 0 ? number_format($m['total'] / $m['calls']) : 0;
+            echo '<tr>
+                <td><code style="font-size:0.78rem">' . htmlspecialchars($model) . '</code></td>
+                <td>' . $m['calls'] . '</td>
+                <td>' . number_format($m['prompt']) . '</td>
+                <td>' . number_format($m['completion']) . '</td>
+                <td><strong>' . number_format($m['total']) . '</strong></td>
+                <td>' . $avg . '</td>
+            </tr>';
+        }
+        echo '</tbody></table></div></div></div>';
+    }
 
     // 操作区
     echo '
