@@ -272,6 +272,23 @@ function save_config(): void {
         opcache_invalidate($configFile, true);
     }
 
+    // ── 模块配置保存 ──
+    if (($input['_section'] ?? '') === 'modules') {
+        foreach ($input as $key => $value) {
+            if (preg_match('/^mod_(.+)_model$/', $key, $m) && isset($config['modules'][$m[1]])) {
+                $config['modules'][$m[1]]['model'] = trim($value);
+            }
+            if (preg_match('/^mod_(.+)_tokens$/', $key, $m) && isset($config['modules'][$m[1]])) {
+                $config['modules'][$m[1]]['max_tokens'] = max(1, (int)$value);
+            }
+        }
+        $export = "<?php\n// 云智计算 全局配置文件\nreturn " . var_export($config, true) . ";\n";
+        $export = preg_replace('/=> \n\s+array \(/', '=> array (', $export);
+        file_put_contents($configFile, $export, LOCK_EX);
+        echo json_encode(['ok' => true, 'message' => '模块配置已保存并生效'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     echo json_encode(['ok' => true, 'message' => '配置已保存并生效'], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -617,13 +634,19 @@ tr:hover { background: rgba(0,0,0,0.02); }
         <div class="panel">
             <div class="panel-header"><i class="fa-solid fa-key mr-2"></i>API 配置</div>
             <div class="panel-body">
-                <table>
-                    <tr><td style="color:var(--muted)">API 端点</td><td><span style="font-family:monospace;font-size:0.78rem">' . htmlspecialchars($config['api']['url']) . '</span></td></tr>
-                    <tr><td style="color:var(--muted)">API Key</td><td><span class="badge badge-warning">' . htmlspecialchars($maskedKey) . '</span></td></tr>
-                    <tr><td style="color:var(--muted)">超时时间</td><td>' . ($config['api']['timeout'] ?? 'N/A') . 's</td></tr>
-                    <tr><td style="color:var(--muted)">限流窗口</td><td>' . ($config["security"]["rate_limit"]["window"] ?? "N/A") . 's / ' . ($config["security"]["rate_limit"]["max_reqs"] ?? "N/A") . '次</td></tr>
-                    <tr><td style="color:var(--muted)">最大问题长度</td><td>' . ($config["security"]["max_question_length"] ?? "N/A") . ' 字符</td></tr>
-                </table>
+                <form onsubmit="saveConfigSection(event, \'api\')" style="display:grid;gap:0.65rem;">
+                    <div class="form-row"><label>API 端点</label><input name="api_url" value="' . htmlspecialchars($config['api']['url']) . '" class="input-sm"></div>
+                    <div class="form-row"><label>API Key</label><input name="api_key" value="' . htmlspecialchars($config['api']['key']) . '" class="input-sm"></div>
+                    <div class="form-row"><label>超时(秒)</label><input name="api_timeout" type="number" value="' . (int)($config['api']['timeout'] ?? 120) . '" class="input-sm w-20"></div>
+                    <div class="form-row"><label>限流窗口(秒)</label><input name="rate_window" type="number" value="' . (int)($config['security']['rate_limit']['window'] ?? 60) . '" class="input-sm w-20"></div>
+                    <div class="form-row"><label>限流最大次数</label><input name="rate_max" type="number" value="' . (int)($config['security']['rate_limit']['max_reqs'] ?? 30) . '" class="input-sm w-20"></div>
+                    <div class="form-row"><label>最大问题长度</label><input name="max_question" type="number" value="' . (int)($config['security']['max_question_length'] ?? 30000) . '" class="input-sm w-24"></div>
+                    <div class="form-row"><label>记忆最大轮数</label><input name="max_rounds" type="number" value="' . (int)($config['memory']['max_rounds'] ?? 30) . '" class="input-sm w-20"></div>
+                    <div class="form-row"><label>上传最大(MB)</label><input name="max_upload" type="number" value="' . round(($config['upload']['max_size'] ?? 10485760) / 1048576) . '" class="input-sm w-20"></div>
+                    <div class="form-row"><label>日志保留(天)</label><input name="log_days" type="number" value="' . (int)($config['security']['log']['retention_days'] ?? 7) . '" class="input-sm w-20"></div>
+                    <div class="form-row"><label>允许来源</label><input name="allowed_origin" value="' . htmlspecialchars($config['security']['allowed_origin']) . '" class="input-sm"></div>
+                    <button type="submit" class="btn btn-primary btn-sm" style="justify-self:start"><i class="fa-solid fa-save"></i> 保存 API 配置</button>
+                </form>
             </div>
         </div>
     </div>
@@ -632,20 +655,23 @@ tr:hover { background: rgba(0,0,0,0.02); }
     <div class="panel">
         <div class="panel-header"><i class="fa-solid fa-cubes mr-2"></i>AI 模块配置 (' . $moduleCount . ' 个)</div>
         <div class="panel-body scroll">
+            <form onsubmit="saveConfigSection(event, \'modules\')">
             <div class="table-wrap">
             <table>
-                <thead><tr><th>模块</th><th>模型</th><th>最大 Tokens</th><th>系统提示词 (前 80 字符)</th></tr></thead>
+                <thead><tr><th>模块</th><th>模型</th><th>Tokens</th></tr></thead>
                 <tbody>';
     foreach ($modules as $name => $mod) {
-        $sysPreview = mb_substr($mod['system'] ?? '', 0, 80) . '…';
         echo '<tr>
             <td><span class="badge badge-success">' . htmlspecialchars($name) . '</span></td>
-            <td><code style="font-size:0.78rem">' . htmlspecialchars($mod['model'] ?? '-') . '</code></td>
-            <td>' . (int)($mod['max_tokens'] ?? 0) . '</td>
-            <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' . htmlspecialchars($sysPreview) . '</td>
+            <td><input name="mod_' . htmlspecialchars($name) . '_model" value="' . htmlspecialchars($mod['model'] ?? '') . '" class="input-sm" style="min-width:130px"></td>
+            <td><input name="mod_' . htmlspecialchars($name) . '_tokens" type="number" value="' . (int)($mod['max_tokens'] ?? 0) . '" class="input-sm w-24"></td>
         </tr>';
     }
-    echo '</tbody></table></div></div></div>';
+    echo '</tbody></table></div>
+            <button type="submit" class="btn btn-primary btn-sm" style="margin-top:0.75rem"><i class="fa-solid fa-save"></i> 保存模块配置</button>
+            </form>
+        </div>
+    </div>';
 
     // 操作区
     echo '
@@ -775,10 +801,12 @@ function toggleConfigEdit() {
     document.getElementById('config-view').classList.toggle('hidden');
     document.getElementById('config-edit').classList.toggle('hidden');
 }
-async function saveConfig(e) {
+function saveConfig(e) { return saveConfigSection(e, 'all'); }
+async function saveConfigSection(e, section) {
     e.preventDefault();
     const form = e.target;
     const data = Object.fromEntries(new FormData(form));
+    data._section = section;
     try {
         const resp = await fetch('?action=api&cmd=save_config&_csrf=' + encodeURIComponent(CSRF_TOKEN), {
             method: 'POST',
