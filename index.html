@@ -1239,6 +1239,85 @@
                 height: 32px;
             }
         }
+        /* ── 暗色主题 ── */
+        [data-theme="dark"] {
+            --color-ink: #e2e8f0;
+            --color-muted: #94a3b8;
+            --color-line: rgba(148, 163, 184, 0.18);
+            --color-primary-soft: rgba(15, 143, 140, 0.16);
+            --color-primary-dark: #5eead4;
+            --shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.25);
+            --shadow-md: 0 18px 42px rgba(0, 0, 0, 0.32);
+            --shadow-strong: 0 24px 60px rgba(0, 0, 0, 0.45);
+        }
+        [data-theme="dark"] body {
+            background: linear-gradient(135deg, #0f172a 0%, #162032 50%, #141428 100%);
+        }
+        [data-theme="dark"] .title-bar {
+            background: linear-gradient(135deg, rgba(30,41,59,0.96), rgba(20,31,47,0.9));
+            border-color: var(--color-line);
+        }
+        [data-theme="dark"] .title-bar button { color: var(--color-muted); }
+        [data-theme="dark"] .title-bar button:hover { background: rgba(15,143,140,0.16); color: var(--color-primary-dark); }
+        [data-theme="dark"] .title-text-content { color: var(--color-primary-dark); }
+        [data-theme="dark"] .chat-container {
+            background: linear-gradient(180deg, rgba(30,41,59,0.92), rgba(20,31,47,0.96));
+            border-color: var(--color-line);
+        }
+        [data-theme="dark"] .chat-container::before { background: linear-gradient(180deg, rgba(15,143,140,0.06), transparent 16rem); }
+        [data-theme="dark"] .chat-input-container {
+            background: linear-gradient(180deg, rgba(30,40,55,0.82), rgba(25,35,50,0.96));
+            border-color: var(--color-line);
+        }
+        [data-theme="dark"] .input-field {
+            background: rgba(30,41,59,0.86);
+            border-color: rgba(148, 163, 184, 0.22);
+            color: var(--color-ink);
+        }
+        [data-theme="dark"] .input-field:focus { border-color: rgba(15,143,140,0.5); box-shadow: 0 0 0 4px rgba(15,143,140,0.16), 0 12px 24px rgba(0,0,0,0.3); }
+        [data-theme="dark"] .input-field:disabled { background: #1e293b; color: #64748b; }
+        [data-theme="dark"] .user-bubble {
+            background: linear-gradient(135deg, #1e3a5f, #1a3350);
+            border-color: rgba(59, 130, 246, 0.3);
+            color: #e2e8f0;
+        }
+        [data-theme="dark"] .ai-bubble {
+            background: linear-gradient(135deg, #1e293b, #162032);
+            border-color: rgba(100, 116, 139, 0.25);
+            color: #e2e8f0;
+        }
+        [data-theme="dark"] .modal-content {
+            background: rgba(20,31,47,0.98);
+            border-color: var(--color-line);
+        }
+        [data-theme="dark"] .modal-header {
+            background: linear-gradient(135deg, rgba(15,143,140,0.12), rgba(228,95,61,0.08));
+            border-color: var(--color-line);
+        }
+        [data-theme="dark"] .modal-footer { background: rgba(15,30,45,0.9); border-color: var(--color-line); }
+        [data-theme="dark"] .modal-header h3, [data-theme="dark"] .modal-body, [data-theme="dark"] .modal-body p { color: #e2e8f0; }
+        [data-theme="dark"] .history-item { background: rgba(30,41,59,0.84); border-color: var(--color-line); }
+        [data-theme="dark"] .history-item:hover { border-color: rgba(15,143,140,0.4); }
+        [data-theme="dark"] .history-item.pinned { background: linear-gradient(135deg, rgba(228,95,61,0.12), rgba(30,41,59,0.9)); }
+        [data-theme="dark"] .history-empty { background: rgba(20,31,47,0.8); }
+        [data-theme="dark"] .btn-secondary {
+            background: rgba(30,41,59,0.86);
+            border-color: var(--color-line);
+            color: var(--color-muted);
+        }
+        [data-theme="dark"] .btn-secondary:hover { background: #1e293b; }
+        [data-theme="dark"] .mode-selector {
+            background: rgba(30,41,59,0.82);
+            border-color: var(--color-line);
+        }
+        [data-theme="dark"] .mode-btn { color: var(--color-muted); }
+        [data-theme="dark"] .mode-btn:hover, [data-theme="dark"] .mode-btn.active { background: var(--color-primary-soft); color: var(--color-primary-dark); }
+        [data-theme="dark"] .scrollbar-thin { scrollbar-color: #475569 #1e293b; }
+        [data-theme="dark"] .scrollbar-thin::-webkit-scrollbar-track { background: #1e293b; }
+        [data-theme="dark"] .scrollbar-thin::-webkit-scrollbar-thumb { background: #475569; }
+        [data-theme="dark"] .thinking-indicator { background: rgba(15,143,140,0.14); color: var(--color-primary-dark); }
+        [data-theme="dark"] .drag-drop-area { background: linear-gradient(145deg, rgba(30,41,59,0.9), rgba(15,143,140,0.1)); }
+        [data-theme="dark"] .attachment-item { background: var(--color-primary-soft); }
     </style>
 </head>
 <body>
@@ -1417,6 +1496,9 @@
         <button onclick="showModal('history-modal')" class="p-2 rounded-lg hover:bg-gray-100 transition flex items-center gap-1 text-sm font-medium text-gray-600" aria-label="查看历史对话">
             <i class="fa-solid fa-clock-rotate-left"></i>历史<span class="hidden md:inline">记录</span>
         </button>
+        <button id="theme-toggle-btn" class="p-2 rounded-lg hover:bg-gray-100 transition flex items-center gap-1 text-sm font-medium text-gray-600" aria-label="切换主题" onclick="toggleTheme()">
+            <i id="theme-icon" class="fa-solid fa-circle-half-stroke"></i>
+        </button>
         <div class="title-container">
             <div class="title-text-wrapper">
                 <div id="title-text" class="title-text-content"></div>
@@ -1498,6 +1580,7 @@ const RETRY_DELAY_BASE = 800;
 const NETWORK_TIMEOUT_MS = 120000;
 const LOCAL_HISTORY_KEY = 'yunzhi_chat_history_v1';
 const LOCAL_HISTORY_LIMIT = 30;
+const THEME_KEY = 'yunzhi_theme_v1';
 // 全局未捕获异常处理 防止页面白屏
 window.addEventListener('error', (event) => {
     console.error('未捕获异常', event.message);
@@ -1805,6 +1888,8 @@ function init() {
     setupEventListeners();
     populateLanguageList();
     if (!restoreLatestConversation()) showWelcomeMessage();
+    applyStoredTheme();
+    startThemeAutoSwitch();
     startTitleAnimation();
     updateSubmitButtonState();
     // 输入框最大长度限制 与服务端保持一致
@@ -1992,6 +2077,52 @@ function showModal(modalId) {
     if (modalId === 'disclaimer-modal') document.getElementById('disclaimer-content').innerHTML = DISCLAIMER_CONTENT;
     else if (modalId === 'ocr-upload-modal') resetOCRModal();
     else if (modalId === 'history-modal') renderHistoryList();
+}
+/* ── 亮暗主题 ── */
+function getStoredTheme() {
+    try { return localStorage.getItem(THEME_KEY) || 'auto'; } catch (e) { return 'auto'; }
+}
+function setStoredTheme(theme) {
+    try { localStorage.setItem(THEME_KEY, theme); } catch (e) {}
+}
+function getTimeTheme() {
+    const hour = new Date().getHours();
+    return (hour >= 6 && hour < 18) ? 'light' : 'dark';
+}
+function resolveTheme() {
+    const stored = getStoredTheme();
+    return stored === 'auto' ? getTimeTheme() : stored;
+}
+function applyStoredTheme() {
+    const theme = resolveTheme();
+    document.documentElement.dataset.theme = theme;
+    updateThemeIcon(theme);
+}
+function updateThemeIcon(currentTheme) {
+    const icon = document.getElementById('theme-icon');
+    if (!icon) return;
+    const stored = getStoredTheme();
+    if (stored === 'auto') {
+        icon.className = 'fa-solid fa-clock';
+        icon.title = '自动切换（' + (currentTheme === 'dark' ? '深色' : '浅色') + '） - 点击切换';
+    } else if (currentTheme === 'dark') {
+        icon.className = 'fa-solid fa-moon';
+        icon.title = '深色模式 - 点击切换';
+    } else {
+        icon.className = 'fa-solid fa-sun';
+        icon.title = '浅色模式 - 点击切换';
+    }
+}
+function toggleTheme() {
+    const stored = getStoredTheme();
+    const next = stored === 'auto' ? 'dark' : (stored === 'dark' ? 'light' : 'auto');
+    setStoredTheme(next);
+    applyStoredTheme();
+}
+function startThemeAutoSwitch() {
+    setInterval(() => {
+        if (getStoredTheme() === 'auto') applyStoredTheme();
+    }, 60000);
 }
 function closeModal(modalId) {
     const modal = document.getElementById(modalId);
@@ -2552,7 +2683,7 @@ function addActionButtons(messageDiv, content, isInitial = false) {
     const footerDiv = document.createElement('div');
     footerDiv.className = 'message-footer flex justify-between items-center';
     const now = new Date();
-    footerDiv.innerHTML = `<span class="message-time text-xs text-gray-500">${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}</span><div class="action-buttons flex gap-1"><button class="action-button" title="复制"><i class="fa-regular fa-copy"></i></button>${!isInitial ? `<button class="action-button" title="重试"><i class="fa-solid fa-rotate-right"></i></button><button class="action-button" title="语音播放"><i class="fa-solid fa-volume-high"></i></button>` : ''}<button class="action-button" title="喜欢"><i class="fa-regular fa-thumbs-up"></i></button><button class="action-button" title="不喜欢"><i class="fa-regular fa-thumbs-down"></i></button></div>`;
+    footerDiv.innerHTML = `<span class="message-time text-xs text-gray-500">${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}</span><div class="action-buttons flex gap-1"><button class="action-button" title="复制"><i class="fa-regular fa-copy"></i></button>${!isInitial ? `<button class="action-button" title="重试"><i class="fa-solid fa-rotate-right"></i></button><button class="action-button" title="语音播放"><i class="fa-solid fa-volume-high"></i></button><button class="action-button" title="删除"><i class="fa-regular fa-trash-can"></i></button>` : ''}<button class="action-button" title="喜欢"><i class="fa-regular fa-thumbs-up"></i></button><button class="action-button" title="不喜欢"><i class="fa-regular fa-thumbs-down"></i></button></div>`;
     contentEl.appendChild(footerDiv);
     const buttons = footerDiv.querySelector('.action-buttons');
     if (!buttons) return;
@@ -2560,6 +2691,7 @@ function addActionButtons(messageDiv, content, isInitial = false) {
     if (!isInitial) {
         buttons.querySelector('[title="重试"]').onclick = () => regenerateResponse(conversationHistory.length - 1);
         buttons.querySelector('[title="语音播放"]').onclick = (e) => playAudioFromText(content || '', e.currentTarget);
+        buttons.querySelector('[title="删除"]').onclick = () => deleteMessageFromActions(messageDiv);
     }
     buttons.querySelector('[title="喜欢"]').onclick = (e) => handleFeedback(e.currentTarget, 'like');
     buttons.querySelector('[title="不喜欢"]').onclick = (e) => handleFeedback(e.currentTarget, 'dislike');
