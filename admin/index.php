@@ -130,6 +130,9 @@ function handle_api(): void {
             }
             echo json_encode($users, JSON_UNESCAPED_UNICODE);
             break;
+        case 'save_config':
+            save_config();
+            break;
         default:
             http_response_code(400);
             echo json_encode(['error' => '未知命令']);
@@ -202,6 +205,77 @@ function clear_memory(string $uid = ''): void {
     }
 }
 
+function save_config(): void {
+    $configFile = PROJECT_ROOT . '/config.php';
+    if (!is_writable($configFile)) {
+        echo json_encode(['error' => '配置文件不可写，请检查权限'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $input = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($input)) {
+        echo json_encode(['error' => '无效的请求数据'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    // 备份原配置
+    copy($configFile, $configFile . '.bak.' . date('YmdHis'));
+
+    // 读取当前配置并在内存中修改
+    $config = include $configFile;
+    if (!is_array($config)) {
+        echo json_encode(['error' => '配置文件解析失败'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if (!empty($input['api_url']) && filter_var($input['api_url'], FILTER_VALIDATE_URL)) {
+        $config['api']['url'] = $input['api_url'];
+    }
+    if (!empty($input['api_key'])) {
+        $config['api']['key'] = trim($input['api_key']);
+    }
+    if (isset($input['api_timeout']) && (int)$input['api_timeout'] > 0) {
+        $config['api']['timeout'] = (int)$input['api_timeout'];
+    }
+    if (isset($input['rate_window']) && (int)$input['rate_window'] > 0) {
+        $config['security']['rate_limit']['window'] = (int)$input['rate_window'];
+    }
+    if (isset($input['rate_max']) && (int)$input['rate_max'] > 0) {
+        $config['security']['rate_limit']['max_reqs'] = (int)$input['rate_max'];
+    }
+    if (isset($input['max_question']) && (int)$input['max_question'] > 0) {
+        $config['security']['max_question_length'] = (int)$input['max_question'];
+    }
+    if (isset($input['max_rounds']) && (int)$input['max_rounds'] > 0) {
+        $config['memory']['max_rounds'] = (int)$input['max_rounds'];
+    }
+    if (isset($input['max_upload']) && (int)$input['max_upload'] > 0) {
+        $config['upload']['max_size'] = (int)$input['max_upload'] * 1048576;
+    }
+    if (isset($input['log_days']) && (int)$input['log_days'] > 0) {
+        $config['security']['log']['retention_days'] = (int)$input['log_days'];
+    }
+    if (!empty($input['allowed_origin'])) {
+        $config['security']['allowed_origin'] = trim($input['allowed_origin']);
+    }
+
+    // 安全写出 PHP 数组
+    $export = "<?php\n// 云智计算 全局配置文件\nreturn " . var_export($config, true) . ";\n";
+    $export = preg_replace('/=> \n\s+array \(/', '=> array (', $export);
+
+    if (file_put_contents($configFile, $export, LOCK_EX) === false) {
+        echo json_encode(['error' => '写入配置文件失败'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if (function_exists('opcache_invalidate')) {
+        opcache_invalidate($configFile, true);
+    }
+
+    echo json_encode(['ok' => true, 'message' => '配置已保存并生效'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 // ═══════════════════════════════════════
 // 登录页面
 // ═══════════════════════════════════════
@@ -214,7 +288,7 @@ function show_login_page(string $error = ''): void {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex, nofollow">
 <title>云智计算 - 后台管理登录</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=".9em" font-size="90">🛡️</text></svg>">
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48dGV4dCB5PSIuOWVtIiBmb250LXNpemU9IjkwIj7wn6TvuI88L3RleHQ+PC9zdmc+" />
 <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
 :root {
@@ -448,6 +522,14 @@ tr:hover { background: rgba(0,0,0,0.02); }
 .toast-success { background: var(--success); color: #fff; }
 .toast-error { background: var(--error); color: #fff; }
 @keyframes slideDown { from { opacity: 0; transform: translateX(-50%) translateY(-20px); } }
+/* ── 配置编辑器 ── */
+.hidden { display: none !important; }
+.form-row { display: flex; align-items: center; gap: 0.75rem; }
+.form-row label { width: 120px; font-size: 0.8rem; font-weight: 600; color: var(--muted); flex-shrink: 0; }
+.input-sm { padding: 0.45rem 0.65rem; border: 1px solid var(--line); border-radius: 8px; font-size: 0.8rem; background: var(--card-bg); color: var(--text); font-family: monospace; flex: 1; }
+.input-sm:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(15,143,140,0.12); }
+.w-20 { max-width: 80px; flex: none; }
+.w-24 { max-width: 100px; flex: none; }
 </style>
 </head>
 <body>
@@ -562,6 +644,45 @@ tr:hover { background: rgba(0,0,0,0.02); }
     }
     echo '</div></div></div>';
 
+    // ── 配置编辑器 ──
+    echo '
+    <div class="panel" id="config-panel">
+        <div class="panel-header">
+            <span><i class="fa-solid fa-sliders mr-2"></i>修改配置</span>
+            <button class="btn btn-sm btn-ghost" onclick="toggleConfigEdit()"><i class="fa-solid fa-pen-to-square"></i> 编辑</button>
+        </div>
+        <div class="panel-body" id="config-view">
+            <div class="table-wrap"><table>
+                <tr><td style="color:var(--muted);width:140px">API 端点</td><td><code>' . htmlspecialchars($config['api']['url']) . '</code></td></tr>
+                <tr><td style="color:var(--muted)">API Key</td><td><code>' . htmlspecialchars($maskedKey) . '</code></td></tr>
+                <tr><td style="color:var(--muted)">超时(秒)</td><td>' . (int)($config['api']['timeout'] ?? 120) . '</td></tr>
+                <tr><td style="color:var(--muted)">限流窗口/次数</td><td>' . (int)($config['security']['rate_limit']['window'] ?? 60) . 's / ' . (int)($config['security']['rate_limit']['max_reqs'] ?? 30) . '次</td></tr>
+                <tr><td style="color:var(--muted)">最大问题长度</td><td>' . (int)($config['security']['max_question_length'] ?? 30000) . ' 字符</td></tr>
+                <tr><td style="color:var(--muted)">记忆最大轮数</td><td>' . (int)($config['memory']['max_rounds'] ?? 30) . ' 轮</td></tr>
+                <tr><td style="color:var(--muted)">上传最大(MB)</td><td>' . round(($config['upload']['max_size'] ?? 10485760) / 1048576) . ' MB</td></tr>
+                <tr><td style="color:var(--muted)">日志保留(天)</td><td>' . (int)($config['security']['log']['retention_days'] ?? 7) . ' 天</td></tr>
+            </table></div>
+        </div>
+        <div class="panel-body hidden" id="config-edit">
+            <form onsubmit="saveConfig(event)" style="display:grid;gap:0.8rem;">
+                <div class="form-row"><label>API 端点</label><input name="api_url" value="' . htmlspecialchars($config['api']['url']) . '" class="input-sm"></div>
+                <div class="form-row"><label>API Key</label><input name="api_key" value="' . htmlspecialchars($config['api']['key']) . '" class="input-sm"></div>
+                <div class="form-row"><label>超时(秒)</label><input name="api_timeout" type="number" value="' . (int)($config['api']['timeout'] ?? 120) . '" class="input-sm w-20"></div>
+                <div class="form-row"><label>限流窗口(秒)</label><input name="rate_window" type="number" value="' . (int)($config['security']['rate_limit']['window'] ?? 60) . '" class="input-sm w-20"></div>
+                <div class="form-row"><label>限流最大次数</label><input name="rate_max" type="number" value="' . (int)($config['security']['rate_limit']['max_reqs'] ?? 30) . '" class="input-sm w-20"></div>
+                <div class="form-row"><label>最大问题长度</label><input name="max_question" type="number" value="' . (int)($config['security']['max_question_length'] ?? 30000) . '" class="input-sm w-24"></div>
+                <div class="form-row"><label>记忆最大轮数</label><input name="max_rounds" type="number" value="' . (int)($config['memory']['max_rounds'] ?? 30) . '" class="input-sm w-20"></div>
+                <div class="form-row"><label>上传最大(MB)</label><input name="max_upload" type="number" value="' . round(($config['upload']['max_size'] ?? 10485760) / 1048576) . '" class="input-sm w-20"></div>
+                <div class="form-row"><label>日志保留(天)</label><input name="log_days" type="number" value="' . (int)($config['security']['log']['retention_days'] ?? 7) . '" class="input-sm w-20"></div>
+                <div class="form-row"><label>允许来源</label><input name="allowed_origin" value="' . htmlspecialchars($config['security']['allowed_origin']) . '" class="input-sm"></div>
+                <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-save"></i> 保存配置</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="toggleConfigEdit()">取消</button>
+                </div>
+            </form>
+        </div>
+    </div>';
+
     // 日志查看器
     echo '
     <div class="panel">
@@ -615,6 +736,28 @@ function showToast(msg, ok = true) {
     el.textContent = msg;
     document.getElementById('toast-container').appendChild(el);
     setTimeout(() => el.remove(), 2500);
+}
+function toggleConfigEdit() {
+    document.getElementById('config-view').classList.toggle('hidden');
+    document.getElementById('config-edit').classList.toggle('hidden');
+}
+async function saveConfig(e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = Object.fromEntries(new FormData(form));
+    try {
+        const resp = await fetch('?action=api&cmd=save_config&_csrf=' + encodeURIComponent(CSRF_TOKEN), {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        const result = await resp.json();
+        showToast(result.message || result.error || '完成', result.ok !== false && !result.error);
+        if (result.ok) setTimeout(() => location.reload(), 1000);
+    } catch (e) {
+        showToast('保存失败: ' + e.message, false);
+    }
 }
 </script>
 </body>
