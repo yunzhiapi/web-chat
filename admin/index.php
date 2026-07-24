@@ -53,10 +53,35 @@ function handle_login(): void {
 }
 
 // ═══════════════════════════════════════
-// API 接口 (需认证)
+// CSRF 令牌
+// ═══════════════════════════════════════
+function csrf_token(): string {
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+function csrf_verify(): void {
+    $token = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? $_GET['_csrf'] ?? '';
+    $stored = $_SESSION['csrf_token'] ?? '';
+    if (!$token || !$stored || !hash_equals($stored, $token)) {
+        http_response_code(403);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['error' => 'CSRF 验证失败，请刷新页面重试']);
+        exit;
+    }
+}
+// 启动 session（用于 CSRF）
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// ═══════════════════════════════════════
+// API 接口 (需认证 + CSRF)
 // ═══════════════════════════════════════
 function handle_api(): void {
     require_auth();
+    csrf_verify();
 
     $cmd = $_GET['cmd'] ?? '';
     header('Content-Type: application/json; charset=utf-8');
@@ -185,13 +210,15 @@ function clear_memory(string $uid = ''): void {
 // 登录页面
 // ═══════════════════════════════════════
 function show_login_page(string $error = ''): void {
-    $errorHtml = $error ? '<div class="alert alert-error">' . htmlspecialchars($error) . '</div>' : '';
+    $errorHtml = $error ? '<div class="alert alert-error"><i class="fa-solid fa-circle-exclamation mr-2"></i>' . htmlspecialchars($error) . '</div>' : '';
     echo '<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
 <title>云智计算 - 后台管理登录</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=".9em" font-size="90">🛡️</text></svg>">
 <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
 :root {
@@ -291,13 +318,16 @@ function show_dashboard(): void {
 
     $modules = $config['modules'] ?? [];
     $moduleCount = count($modules);
+    $csrf = csrf_token();
 
     echo '<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
 <title>云智计算 - 后台管理面板</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=".9em" font-size="90">🛡️</text></svg>">
 <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
 :root {
@@ -313,6 +343,14 @@ function show_dashboard(): void {
     --error: #ef4444;
     --line: rgba(0,0,0,0.07);
     --shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+[data-theme="dark"] {
+    --bg: #0b1120;
+    --card-bg: #1a2332;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --line: rgba(255,255,255,0.06);
+    --shadow: 0 2px 12px rgba(0,0,0,0.3);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -338,6 +376,20 @@ body {
 .btn-primary { background: var(--primary); color: #fff; }
 .btn-primary:hover { background: var(--primary-dark); }
 .btn-sm { padding: 0.25rem 0.6rem; font-size: 0.7rem; border-radius: 6px; }
+/* ── 暗色覆盖 ── */
+[data-theme="dark"] .stat-card { background: var(--card-bg); border-color: var(--line); }
+[data-theme="dark"] table tr:hover { background: rgba(255,255,255,0.03); }
+[data-theme="dark"] .btn-ghost:hover { background: rgba(255,255,255,0.06); color: #e2e8f0; }
+[data-theme="dark"] .log-viewer { background: #0d1520; }
+[data-theme="dark"] .topbar { border-color: var(--line); }
+[data-theme="dark"] .badge-success { background: #064e3b; color: #6ee7b7; }
+[data-theme="dark"] .badge-warning { background: #78350f; color: #fcd34d; }
+[data-theme="dark"] .badge-error { background: #7f1d1d; color: #fca5a5; }
+[data-theme="dark"] .stat-icon.blue { background: #1e3a5f; color: #60a5fa; }
+[data-theme="dark"] .stat-icon.green { background: #064e3b; color: #34d399; }
+[data-theme="dark"] .stat-icon.amber { background: #78350f; color: #fbbf24; }
+[data-theme="dark"] .stat-icon.red { background: #7f1d1d; color: #f87171; }
+[data-theme="dark"] .stat-icon.purple { background: #4c1d95; color: #a78bfa; }
 /* ── 主布局 ── */
 .layout { max-width: 1280px; margin: 0 auto; padding: 1.5rem; display: grid; gap: 1.25rem; }
 /* ── 统计卡片 ── */
@@ -531,9 +583,19 @@ tr:hover { background: rgba(0,0,0,0.02); }
 <div id="toast-container"></div>
 
 <script>
+const CSRF_TOKEN = '<?php echo $csrf; ?>';
+const ADMIN_BASE_URL = '<?php echo ADMIN_BASE; ?>';
+
+// ── 暗色模式自动检测 ──
+(function() {
+    const stored = localStorage.getItem('yunzhi_admin_theme');
+    const theme = stored || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = theme;
+})();
+
 async function apiAction(cmd, extra = '') {
     try {
-        const resp = await fetch('?action=api&cmd=' + cmd + extra);
+        const resp = await fetch('?action=api&cmd=' + cmd + '&_csrf=' + encodeURIComponent(CSRF_TOKEN) + extra);
         const data = await resp.json();
         showToast(data.message || data.error || '完成', data.ok !== false && !data.error);
         setTimeout(() => location.reload(), 800);
@@ -543,7 +605,7 @@ async function apiAction(cmd, extra = '') {
 }
 async function refreshLogs() {
     try {
-        const resp = await fetch('?action=api&cmd=logs&type=today');
+        const resp = await fetch('?action=api&cmd=logs&type=today&_csrf=' + encodeURIComponent(CSRF_TOKEN));
         const data = await resp.json();
         document.getElementById('log-viewer').textContent = data.content || '暂无日志';
         showToast('日志已刷新', true);

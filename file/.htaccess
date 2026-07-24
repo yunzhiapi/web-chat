@@ -1,0 +1,19 @@
+# 禁止目录浏览和直接访问敏感文件
+Options -Indexes
+
+# 仅允许访问图片、PDF 和 JSON 文件
+<FilesMatch ".*">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
+
+<FilesMatch "\.(jpg|jpeg|png|gif|webp|bmp|tif|tiff|pdf|json|gz|log)$">
+    Order Deny,Allow
+    Allow from all
+</FilesMatch>
+
+# 禁止访问隐藏文件和配置文件
+<FilesMatch "^\.">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
