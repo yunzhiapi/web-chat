@@ -759,6 +759,36 @@
             box-shadow: var(--shadow-sm);
             transform: translateY(-1px);
         }
+        .history-item.pinned {
+            border-color: rgba(228, 95, 61, 0.35);
+            background: linear-gradient(135deg, rgba(255,248,243,0.95), rgba(255,255,255,0.88));
+        }
+        .history-actions {
+            display: flex;
+            gap: 0.25rem;
+            margin-top: 0.65rem;
+            flex-wrap: wrap;
+        }
+        .history-action-btn {
+            background: none;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            padding: 0.25rem 0.55rem;
+            font-size: 0.75rem;
+            color: var(--color-muted);
+            cursor: pointer;
+            transition: var(--transition-normal);
+        }
+        .history-action-btn:hover {
+            background: rgba(15, 143, 140, 0.08);
+            border-color: rgba(15, 143, 140, 0.2);
+            color: var(--color-primary);
+        }
+        .history-action-btn.danger:hover {
+            background: rgba(228, 95, 61, 0.08);
+            border-color: rgba(228, 95, 61, 0.2);
+            color: var(--color-accent);
+        }
         .history-title {
             color: var(--color-ink);
             font-weight: 700;
@@ -1290,9 +1320,14 @@
                 <div id="history-list" class="history-list"></div>
             </div>
             <div class="modal-footer flex justify-between gap-3">
-                <button class="px-4 py-2 btn-secondary rounded-lg" onclick="clearConversationHistoryStore()">
-                    <i class="fa-solid fa-trash-can mr-2"></i>清空历史
-                </button>
+                <div class="flex gap-2">
+                    <button class="px-4 py-2 btn-secondary rounded-lg" onclick="clearConversationHistoryStore()">
+                        <i class="fa-solid fa-trash-can mr-2"></i>清空历史
+                    </button>
+                    <button class="px-4 py-2 btn-secondary rounded-lg" onclick="exportAllConversations()">
+                        <i class="fa-solid fa-download mr-2"></i>导出全部
+                    </button>
+                </div>
                 <button class="px-4 py-2 btn-primary rounded-lg" onclick="closeModal('history-modal')">完成</button>
             </div>
         </div>
@@ -1577,10 +1612,12 @@ function buildConversationTitle(messages = conversationHistory) {
 function persistCurrentConversation() {
     if (!hasRealConversationContent()) return;
     const saved = getSavedConversations().filter(item => item.id !== currentConversationId);
+    const existing = getSavedConversations().find(item => item.id === currentConversationId);
     const record = {
         id: currentConversationId,
-        title: buildConversationTitle(),
+        title: existing?.title || buildConversationTitle(),
         updatedAt: Date.now(),
+        pinned: existing?.pinned || false,
         memoryId,
         messages: JSON.parse(JSON.stringify(conversationHistory))
     };
@@ -1620,7 +1657,13 @@ function renderHistoryList() {
     const list = document.getElementById('history-list');
     if (!list) return;
     const term = (document.getElementById('history-search')?.value || '').trim().toLowerCase();
-    const conversations = getSavedConversations().filter(item => !term || (item.title || '').toLowerCase().includes(term));
+    let conversations = getSavedConversations().filter(item => !term || (item.title || '').toLowerCase().includes(term));
+    // 置顶优先，再按更新时间降序
+    conversations.sort((a, b) => {
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+    });
     if (conversations.length === 0) {
         list.innerHTML = '<div class="history-empty">暂无历史对话</div>';
         return;
@@ -1628,14 +1671,26 @@ function renderHistoryList() {
     list.innerHTML = conversations.map(item => {
         const date = new Date(item.updatedAt || Date.now());
         const turnCount = (item.messages || []).filter(message => message.question || message.attachment).length;
-        return `<div class="history-item">
+        const pinnedClass = item.pinned ? ' pinned' : '';
+        return `<div class="history-item${pinnedClass}">
             <button class="w-full text-left" onclick="loadConversationFromHistory('${escapeHtml(item.id)}')">
-                <div class="history-title">${escapeHtml(item.title || '新对话')}</div>
+                <div class="history-title">${item.pinned ? '<i class="fa-solid fa-thumbtack mr-1" style="color:var(--color-accent);font-size:0.7rem;"></i>' : ''}${escapeHtml(item.title || '新对话')}</div>
                 <div class="history-meta">${date.toLocaleString()} · ${turnCount} 条消息</div>
             </button>
-            <button class="mt-3 text-sm text-error hover:underline" onclick="deleteConversationFromHistory('${escapeHtml(item.id)}')">
-                <i class="fa-solid fa-trash-can mr-1"></i>删除
-            </button>
+            <div class="history-actions">
+                <button class="history-action-btn" onclick="event.stopPropagation();pinConversation('${escapeHtml(item.id)}')" title="${item.pinned ? '取消置顶' : '置顶'}">
+                    <i class="fa-solid fa-thumbtack"></i> ${item.pinned ? '取消' : '置顶'}
+                </button>
+                <button class="history-action-btn" onclick="event.stopPropagation();renameConversation('${escapeHtml(item.id)}')" title="重命名">
+                    <i class="fa-solid fa-pen"></i> 重命名
+                </button>
+                <button class="history-action-btn" onclick="event.stopPropagation();exportConversation('${escapeHtml(item.id)}')" title="导出JSON">
+                    <i class="fa-solid fa-download"></i> 导出
+                </button>
+                <button class="history-action-btn danger" onclick="event.stopPropagation();deleteConversationFromHistory('${escapeHtml(item.id)}')" title="删除">
+                    <i class="fa-solid fa-trash-can"></i> 删除
+                </button>
+            </div>
         </div>`;
     }).join('');
 }
@@ -1666,6 +1721,52 @@ function clearConversationHistoryStore() {
     localStorage.removeItem(LOCAL_HISTORY_KEY);
     renderHistoryList();
     showCopyFeedback('已清空历史对话');
+}
+function pinConversation(id) {
+    const conversations = getSavedConversations();
+    const target = conversations.find(item => item.id === id);
+    if (!target) return;
+    target.pinned = !target.pinned;
+    localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(conversations));
+    if (currentConversationId === id) currentConversationId = id;
+    renderHistoryList();
+    showCopyFeedback(target.pinned ? '已置顶' : '已取消置顶');
+}
+function renameConversation(id) {
+    const conversations = getSavedConversations();
+    const target = conversations.find(item => item.id === id);
+    if (!target) return;
+    const newTitle = prompt('请输入新名称：', target.title || '新对话');
+    if (newTitle === null) return;
+    const trimmed = newTitle.trim();
+    if (!trimmed) { showCopyFeedback('名称不能为空', true); return; }
+    target.title = trimmed.slice(0, 80);
+    localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(conversations));
+    renderHistoryList();
+    showCopyFeedback('已重命名');
+}
+function exportConversation(id) {
+    const record = getSavedConversations().find(item => item.id === id);
+    if (!record) return;
+    downloadJSON(record, (record.title || '对话') + '.json');
+    showCopyFeedback('已导出');
+}
+function exportAllConversations() {
+    const conversations = getSavedConversations();
+    if (conversations.length === 0) { showCopyFeedback('暂无历史对话可导出', true); return; }
+    downloadJSON(conversations, 'yunzhi-chat-history.json');
+    showCopyFeedback('已导出全部历史');
+}
+function downloadJSON(data, filename) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 function createNewConversation() {
     if (codeModeActive) {
